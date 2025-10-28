@@ -1,0 +1,460 @@
+### task-00
+
+```bash
+docker compose version
+```
+```
+Docker Compose version v2.40.2
+```
+
+### task-01
+
+#### Dockerfile
+
+```dockerfile
+FROM python:3.12-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
+COPY --chown=appuser:appuser . .
+
+USER appuser
+
+EXPOSE 5000
+
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:5000/health || exit 1
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5000"]
+```
+
+#### .dockerignore
+
+```
+haproxy/
+nginx/
+
+.dockerignore
+.env
+
+Dockerfile
+LICENSE
+
+*.md
+*.pdf
+*.yaml
+```
+
+#### Проверка приложения
+
+```bash
+docker run test-app
+```
+```
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:5000 (Press CTRL+C to quit)
+Приложение запускается...
+Ошибка при подключении к БД или создании таблицы: 2003 (HY000): Can't connect to MySQL server on '127.0.0.1:3306' (111)
+INFO:     127.0.0.1:44170 - "GET /health HTTP/1.1" 404 Not Found
+```
+
+### task-03
+
+#### compose.yaml
+
+```yaml
+version: '3.8'
+
+include:
+  - backend.yaml
+  - proxy.yaml
+
+networks:
+  backend:
+    driver: bridge
+    ipam:
+     config:
+       - subnet: 172.20.0.0/24
+```
+
+#### backend.yaml
+
+```yaml
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    networks:
+      backend:
+        ipv4_address: 172.20.0.5
+    environment:
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_NAME=${MYSQL_DATABASE}
+      - DB_USER=${MYSQL_USER}
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: mysql:8
+    restart: always
+    networks:
+      backend:
+        ipv4_address: 172.20.0.10
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE}
+      - MYSQL_USER=${MYSQL_USER}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+    env_file:
+      - .env
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
+
+volumes:
+  db_data:
+```
+
+#### proxy.yaml
+
+```yaml
+services:
+  reverse-proxy:
+    image: haproxy:2.4
+    restart: always
+    networks:
+        backend: {}
+    ports:
+    - "127.0.0.1:8080:8080"
+    volumes:
+    - ./haproxy/reverse/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:rw 
+
+  ingress-proxy:
+    image: nginx:latest
+    restart: always
+    network_mode: host
+    volumes:
+    - ./nginx/ingress/default.conf:/etc/nginx/conf.d/default.conf:rw
+    - ./nginx/ingress/nginx.conf:/etc/nginx/nginx.conf:rw
+```
+
+#### Запуск проекта
+
+```bash
+docker compose up -d
+```
+```
+WARN[0000] /home/andrew/shvirtd-example-python/compose.yaml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion 
+[+] Running 5/5
+ ✔ Network shvirtd-example-python_backend            Create...                                          0.1s 
+ ✔ Container shvirtd-example-python-reverse-proxy-1  Started                                            0.9s 
+ ✔ Container shvirtd-example-python-db-1             Healthy                                            6.3s 
+ ✔ Container shvirtd-example-python-ingress-proxy-1  Started                                            0.6s 
+ ✔ Container shvirtd-example-python-web-1            Starte...                                          6.3s 
+```
+
+#### Проверка базы данных
+
+```bash
+docker exec -ti 5e4c2fd83e7c mysql -uroot -pYtReWq4321
+```
+
+```sql
+show databases;
+```
+```
++--------------------+
+| Database           |
++--------------------+
+| information_schema |
+| mysql              |
+| performance_schema |
+| sys                |
+| virtd              |
++--------------------+
+```
+
+```sql
+use virtd;
+```
+```
+Reading table information for completion of table and column names
+You can turn off this feature to get a quicker startup with -A
+
+Database changed
+```
+
+```sql
+show tables;
+```
+```
++-----------------+
+| Tables_in_virtd |
++-----------------+
+| requests        |
++-----------------+
+```
+
+```sql
+SELECT * from requests LIMIT 10;
+```
+```
++----+---------------------+------------+
+| id | request_date        | request_ip |
++----+---------------------+------------+
+|  1 | 2025-10-28 10:09:39 | 127.0.0.1  |
+|  2 | 2025-10-28 10:09:41 | 127.0.0.1  |
+|  3 | 2025-10-28 10:09:42 | 127.0.0.1  |
++----+---------------------+------------+
+```
+
+### task-04
+
+#### Bash скрипт
+
+```bash
+#!/bin/bash
+
+set -e
+
+REPO_URL="https://github.com/andrew-dibov/shvirtd-example-python.git"
+TARGET_DIR="/opt/shvirtd-example-python"
+
+mkdir -p /opt
+
+if [ -d "$TARGET_DIR" ]; then
+    cd "$TARGET_DIR"
+    git pull origin main
+else
+    git clone "$REPO_URL" "$TARGET_DIR"
+    cd "$TARGET_DIR"
+fi
+
+docker-compose up -d
+```
+
+#### Выполнение
+
+```bash
+nvim script.sh
+```
+
+```bash
+sudo chmod +x script.sh
+```
+
+```bash
+sudo ./script.sh
+```
+``` 
+Cloning into '/opt/shvirtd-example-python'...
+remote: Enumerating objects: 90, done.
+remote: Counting objects: 100% (48/48), done.
+remote: Compressing objects: 100% (23/23), done.
+remote: Total 90 (delta 26), reused 33 (delta 23), pack-reused 42 (from 2)
+Receiving objects: 100% (90/90), 58.03 KiB | 632.00 KiB/s, done.
+Resolving deltas: 100% (27/27), done.
+WARN[0000] /opt/shvirtd-example-python/compose.yaml: the attribute `version` is obsolete, it will be ignored, please remove it to avoid potential confusion 
+[+] Running 5/5
+ ✔ Network shvirtd-example-python_backend            Cr...                                          0.1s 
+ ✔ Container shvirtd-example-python-reverse-proxy-1  Started                                        0.8s 
+ ✔ Container shvirtd-example-python-ingress-proxy-1  Started                                        0.6s 
+ ✔ Container shvirtd-example-python-db-1             Hea...                                         6.2s 
+ ✔ Container shvirtd-example-python-web-1            St...                                          6.1s
+```
+
+#### Проверка базы данных
+
+```bash
+sudo docker exec -ti 8a1956334c13 mysql -uroot -pYtReWq4321
+```
+
+```sql
+show databases;
+```
+```
++--------------------+
+| Database           |
++--------------------+
+| information_schema |
+| mysql              |
+| performance_schema |
+| sys                |
+| virtd              |
++--------------------+
+```
+
+```sql
+use virtd;
+```
+```
+Reading table information for completion of table and column names
+You can turn off this feature to get a quicker startup with -A
+
+Database changed
+```
+
+```sql
+show tables;
+```
+```
++-----------------+
+| Tables_in_virtd |
++-----------------+
+| requests        |
++-----------------+
+```
+
+```sql
+SELECT * from requests LIMIT 10;
+```
+```
++----+---------------------+-----------------+
+| id | request_date        | request_ip      |
++----+---------------------+-----------------+
+|  1 | 2025-10-28 11:42:22 | 95.154.118.5    |
+|  2 | 2025-10-28 11:42:30 | 185.37.147.117  |
+|  3 | 2025-10-28 11:42:30 | 185.209.161.145 |
+|  4 | 2025-10-28 11:42:30 | 65.109.182.130  |
+|  5 | 2025-10-28 11:42:30 | 194.26.229.20   |
+|  6 | 2025-10-28 11:42:30 | 195.154.114.92  |
+|  7 | 2025-10-28 11:42:30 | 185.130.104.238 |
+|  8 | 2025-10-28 11:42:30 | 185.19.33.131   |
+|  9 | 2025-10-28 11:42:30 | 195.211.27.85   |
+| 10 | 2025-10-28 11:42:30 | 179.43.148.195  |
++----+---------------------+-----------------+
+```
+
+#### Fork
+
+```
+https://github.com/andrew-dibov/shvirtd-example-python
+```
+
+### task-06
+
+#### Dive + Docker save
+
+```bash
+docker pull hashicorp/terraform:latest
+```
+```
+latest: Pulling from hashicorp/terraform
+63d36825ec9a: Pull complete 
+259d2b1ed9c2: Pull complete 
+9187ecd1f1e0: Pull complete 
+fd5975e7a295: Pull complete 
+Digest: sha256:eebc943e69008b6d6d986800087164274d8c92d83db8d53fb9baa4ccff309884
+Status: Downloaded newer image for hashicorp/terraform:latest
+docker.io/hashicorp/terraform:latest
+```
+
+```bash
+sudo dive hashicorp/terraform:latest
+```
+```
+Image Source: docker://hashicorp/terraform:latest
+Extracting image from docker-engine... (this can take a while for large images)
+Analyzing image...
+Building cache...
+```
+
+```bash
+docker save hashicorp/terraform:latest -o terraform.tar
+```
+
+```bash
+mkdir terraform_extracted
+tar -xf terraform.tar -C terraform_extracted
+```
+
+```bash
+cd terraform_extracted/blobs/sha256/
+ls -la
+```
+```
+total 126716
+drwxr-xr-x. 2 andrew andrew      4096 Oct 28 22:43 .
+drwxr-xr-x. 3 andrew andrew        20 Oct 15 09:52 ..
+-rw-r--r--. 1 andrew andrew   8607232 Oct 15 09:52 256f393e029fa2063d8c93720da36a74a032bed3355a2bc3e313ad12f8bde9d1
+-rw-r--r--. 1 andrew andrew       477 Oct 15 09:52 304c9c620094249cb3d9e15e5fd579c9236565b6f1ae01a95d73c7bcc631b7eb
+-rw-r--r--. 1 andrew andrew      8704 Oct 15 09:52 3af73ac43bbfe458728df6e2ea88876377c45fef9287a6b091864666054ea2e0
+-rw-r--r--. 1 andrew andrew      1695 Oct 15 09:52 607bea8898a03812b3e58f48c172f093b1c947e170fb62b2717df982ee364aa1
+-rw-r--r--. 1 andrew andrew 100407808 Oct 15 09:52 6cebf11f9ab6065bae4d570cdcb45eb101bb9afcec48facc7c8e1029bc2b2989
+-rw-r--r--. 1 andrew andrew       860 Jan  1  1970 78030717a641cc408468591154b0f25c99adaab1b8f86bb36f44fa7069e384fc
+-rw-r--r--. 1 andrew andrew      4270 Oct 15 09:52 82e63b0e94116552579f80bee839d55d34131e1fb65f7446c402409f7a3c1d78
+-rw-r--r--. 1 andrew andrew       401 Oct 15 09:52 8688ab2e4d857c21ff50a2ef424a8e70063c8ff6b21377761f2c4d9fb2ede747
+-rw-r--r--. 1 andrew andrew       477 Oct 15 09:52 9868f94e923014dd2e0769c07ef7b170a32f4ef3f9787b4632142f7132ff898e
+-rw-r--r--. 1 andrew andrew  20689408 Oct 15 09:52 fcb358dbf39f82c22ebe9c0dae15f1e73b28578880fa743630c9f9347534a248
+```
+
+```bash
+tar -tf 6cebf11f9ab6065bae4d570cdcb45eb101bb9afcec48facc7c8e1029bc2b2989
+```
+```
+bin/
+bin/terraform
+```
+
+```bash
+tar -xf 6cebf11f9ab6065bae4d570cdcb45eb101bb9afcec48facc7c8e1029bc2b2989 -O bin/terraform > terraform_binary
+mv terraform_binary ~
+```
+
+```bash
+cd
+sudo chmod +x terraform_binary
+./terraform_binary -v
+```
+```
+Terraform v1.13.4
+on linux_amd64
+```
+
+#### Docker cp
+
+```bash
+docker create --name temp_terraform hashicorp/terraform:latest
+```
+
+```bash
+docker cp temp_terraform:/bin/terraform ./terraform
+```
+
+```bash
+docker rm temp_terraform
+```
+
+```bash
+chmod +x terraform
+```
+
+```bash
+./terraform version
+```
+```
+Terraform v1.13.4
+on linux_amd64
+```
