@@ -1,0 +1,101 @@
+```bash
+terraform --version
+```
+```
+Terraform v1.12.0
+on linux_amd64
+```
+
+```bash
+docker -v
+```
+```
+Docker version 28.5.1, build e180ab8
+```
+
+```bash
+terraform init
+```
+
+### task-01
+
+- Личная информация хранится в .tfstate
+- `"result": "0Yqv1ATNhXIrlLjk"`
+
+```h
+terraform {
+  required_providers {
+    docker = {
+      source  = "kreuzwerker/docker"
+      version = "~> 3.0.1"
+    }
+  }
+  required_version = "~>1.12.0"
+}
+provider "docker" {}
+
+resource "random_password" "random_string" {
+  length      = 16
+  special     = false
+  min_upper   = 1
+  min_lower   = 1
+  min_numeric = 1
+}
+
+resource "docker_image" "nginx" { # отсутствие имени ресурса
+  name         = "nginx:latest"
+  keep_locally = true
+}
+
+resource "docker_container" "nginx" { # невалидное имя ресурса
+  image = docker_image.nginx.image_id
+  name  = "example_${random_password.random_string.result}" # ошибки в ссылке на ресурс
+
+  ports {
+    internal = 80
+    external = 9090
+  }
+}
+```
+
+```bash
+terraform apply
+```
+```
+[andrew@localhost src]$ docker ps -a
+CONTAINER ID   IMAGE          COMMAND                  CREATED          STATUS          PORTS                  NAMES
+1624ad702865   657fdcd1c365   "/docker-entrypoint.…"   11 seconds ago   Up 10 seconds   0.0.0.0:9091->80/tcp   example_Ke3PwT49E809qUJ1
+```
+
+ПОМЕНЯЛ ПОРТ, т.к. в виртуалке в которой работаю, он занят системной службой
+
+```bash
+sudo lsof -i :9090
+```
+```
+COMMAND PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
+systemd   1 root   83u  IPv6   5565      0t0  TCP *:websm (LISTEN)
+```
+
+- Применение флага -auto-approve приводит к автоматическим изменениям без подтверждения пользователя - критически важные изменения без прредупреждений или удаление важных ресурсов
+
+```bash
+docker ps -a
+```
+```
+CONTAINER ID   IMAGE          COMMAND                  CREATED         STATUS         PORTS                  NAMES
+10516dbe3ed9   657fdcd1c365   "/docker-entrypoint.…"   6 minutes ago   Up 6 minutes   0.0.0.0:9091->80/tcp   hello_world_Ke3PwT49E809qUJ1
+```
+
+```bash
+terraform destroy
+```
+
+```bash
+docker ps -a
+```
+```
+CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES
+```
+
+- keep_locally (Boolean) If true, then the Docker image won't be deleted on destroy operation. If this is false, it will delete the image from the docker local storage on destroy operation.
