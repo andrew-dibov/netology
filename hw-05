@@ -1,0 +1,13 @@
+```bash
+docker swarm init --advertise-addr 84.252.135.31
+```
+```
+docker swarm join --token SWMTKN-1-5vah2eglxi0xo9u08e7uwfcvnd3km6mrwl9gd2e4w9xonftcqn-a9orx7ah2l3fjkby0b7for7uv 84.252.135.31:2377
+```
+
+```bash
+sudo docker swarm join --token SWMTKN-1-5vah2eglxi0xo9u08e7uwfcvnd3km6mrwl9gd2e4w9xonftcqn-a9orx7ah2l3fjkby0b7for7uv 84.252.135.31:2377
+```
+```
+This node joined a swarm as a worker.
+```
