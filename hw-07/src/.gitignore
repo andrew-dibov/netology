@@ -1,0 +1,12 @@
+**/.terraform/*
+.terraform*
+
+!.terraformrc
+
+*.tfstate
+*.tfstate.*
+
+terraform.tfvars
+
+.iam.json
+.ssh/
